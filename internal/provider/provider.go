@@ -145,7 +145,9 @@ func (p *xsynchProvider) Configure(ctx context.Context, req provider.ConfigureRe
 
 // DataSources defines the data sources implemented in the provider.
 func (p *xsynchProvider) DataSources(_ context.Context) []func() datasource.DataSource {
-    return nil
+    return []func() datasource.DataSource {
+        NewXsynchcoAWSDataSource,
+    }
 }
 
 // Resources defines the resources implemented in the provider.

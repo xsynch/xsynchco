@@ -27,15 +27,14 @@ type xsynchcoAWSDataSource struct{
 }
 
 type bucketModel struct {
-	Date hashitypes.String
-	Name hashitypes.String 
-	Tags []string
-	Description string 
+	Date hashitypes.String `tfsdk:"date"`
+	Name hashitypes.String `tfsdk:"name"`
+	Tags []string			`tfsdk:"tags"`
+	Description string 		`tfsdk:"description"`
 }
 
 type awsBucketDataSourceModel struct {
-	ID int
-	Buckets []bucketModel
+	Buckets []bucketModel `tfsdk:"s3bucket"`
 }
 
 // Metadata returns the data source type name.

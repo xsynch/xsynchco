@@ -8,7 +8,12 @@ terraform {
 
 provider "xsynchco" {
   cloud_provider = "aws"
+  region = "us-east-1"
 }
 
-# data "xsynchco_bucket_aws" "example" {}
+data "xsynchco_aws" "example" {}
+
+output "all_buckets" {
+  value = data.xsynchco_aws.example 
+}
 

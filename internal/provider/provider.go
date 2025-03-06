@@ -24,10 +24,10 @@ type ClientS3 struct {
 }
 
 type xsynchco struct {
-    Cloud_Provider hashitypes.String
-    Username hashitypes.String
-    Password hashitypes.String 
-    Region hashitypes.String
+    Cloud_Provider hashitypes.String `tfsdk:"cloud_provider"`
+    Username hashitypes.String  `tfsdk:"username"`
+    Password hashitypes.String  `tfsdk:"password"`
+    Region hashitypes.String    `tfsdk:"region"`
 }
 
 

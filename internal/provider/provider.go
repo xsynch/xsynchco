@@ -13,7 +13,8 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/provider/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	hashitypes "github.com/hashicorp/terraform-plugin-framework/types"
-	// "github.com/aws/aws-sdk-go-v2/service/s3/types"
+    "github.com/hashicorp/terraform-plugin-log/tflog"
+	
 )
 
 
@@ -41,7 +42,7 @@ func NewClientS3(region string) (*ClientS3,error){
 		
 	}
 	s3Client := s3.NewFromConfig(sdkConfig)
-
+    
 	return &ClientS3{ S3Client: s3Client, Region: region},nil 
 }
 
@@ -127,8 +128,8 @@ func (p *xsynchProvider) Configure(ctx context.Context, req provider.ConfigureRe
         region = xsynchcoConfig.Region.ValueString()
     }
     
-
-
+    ctx = tflog.SetField(ctx,"Cloud Provider",xsynchcoConfig.Cloud_Provider.ValueString())
+    tflog.Debug(ctx,"Creating AWS Client")
     s3Client,err := NewClientS3(region)
     if err != nil {
         resp.Diagnostics.AddError("unable to create AWS client","An unexpected error occurred creating the AWS client: " + err.Error())
@@ -140,6 +141,8 @@ func (p *xsynchProvider) Configure(ctx context.Context, req provider.ConfigureRe
     
     resp.DataSourceData = s3Client
     resp.ResourceData = s3Client
+
+    tflog.Info(ctx,"Configured AWS Client",map[string]any{"success":true})
     
 }
 
@@ -152,5 +155,7 @@ func (p *xsynchProvider) DataSources(_ context.Context) []func() datasource.Data
 
 // Resources defines the resources implemented in the provider.
 func (p *xsynchProvider) Resources(_ context.Context) []func() resource.Resource {
-    return nil
+    return []func() resource.Resource{
+        NewS3Resource,
+    }
 }

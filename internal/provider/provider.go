@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
@@ -14,6 +15,12 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	hashitypes "github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
+)
+
+var (
+	region string 
+	awsClient *ClientS3
+	err error
 )
 
 type ClientS3 struct {
@@ -28,6 +35,11 @@ type xsynchco struct {
 	Region         hashitypes.String `tfsdk:"region"`
 }
 
+type azureProviderStruct struct {
+    azClient  *azidentity.DefaultAzureCredential
+	Region string 
+}
+
 func NewClientS3(region string) (*ClientS3, error) {
 	ctx := context.Background()
 
@@ -39,6 +51,17 @@ func NewClientS3(region string) (*ClientS3, error) {
 	s3Client := s3.NewFromConfig(sdkConfig)
 
 	return &ClientS3{S3Client: s3Client, Region: region}, nil
+}
+
+func newAZClient(region string) (*azureProviderStruct, error){
+	// ctx := context.Background()
+
+	azConfig,err := azidentity.NewDefaultAzureCredential(nil)
+	if err != nil {
+		return &azureProviderStruct{},errors.New("error loading azure configuration information")
+	}
+
+	return &azureProviderStruct{azClient: azConfig, Region: region},nil 
 }
 
 // Ensure the implementation satisfies the expected interfaces.
@@ -116,25 +139,40 @@ func (p *xsynchProvider) Configure(ctx context.Context, req provider.ConfigureRe
 			"Region for the new storage account must be specified",
 		)
 	}
-	region := os.Getenv("S3_REGION")
+	
 
 	if !xsynchcoConfig.Region.IsNull() {
 		region = xsynchcoConfig.Region.ValueString()
+	} else {
+		region = os.Getenv("S3_REGION")
 	}
 
-	ctx = tflog.SetField(ctx, "Cloud Provider", xsynchcoConfig.Cloud_Provider.ValueString())
-	tflog.Debug(ctx, "Creating AWS Client")
-	s3Client, err := NewClientS3(region)
-	if err != nil {
-		resp.Diagnostics.AddError("unable to create AWS client", "An unexpected error occurred creating the AWS client: "+err.Error())
+	switch xsynchcoConfig.Cloud_Provider.ValueString(){
+	case "aws":
+		ctx = tflog.SetField(ctx, "Cloud Provider", xsynchcoConfig.Cloud_Provider.ValueString())
+		tflog.Debug(ctx, "Creating AWS Client")
+		awsClient, err = NewClientS3(region)
+		if err != nil {
+			resp.Diagnostics.AddError("unable to create AWS client", "An unexpected error occurred creating the AWS client: "+err.Error())
+	
+		}
 
 	}
+
+
+	// s3Client, err := NewClientS3(region)
+	// if err != nil {
+	// 	resp.Diagnostics.AddError("unable to create AWS client", "An unexpected error occurred creating the AWS client: "+err.Error())
+
+	// }
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	resp.DataSourceData = s3Client
-	resp.ResourceData = s3Client
+
+
+	resp.DataSourceData = awsClient
+	resp.ResourceData = awsClient
 
 	tflog.Info(ctx, "Configured AWS Client", map[string]any{"success": true})
 
@@ -152,4 +190,12 @@ func (p *xsynchProvider) Resources(_ context.Context) []func() resource.Resource
 	return []func() resource.Resource{
 		NewS3Resource,
 	}
+}
+
+func CreateAwsClient(region string) (*ClientS3,error){
+	client,err := NewClientS3(region)
+	if err != nil {
+		return &ClientS3{},err 
+	}
+	return client,nil 
 }

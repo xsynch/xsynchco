@@ -21,6 +21,7 @@ var (
 	region string 
 	awsClient *ClientS3
 	err error
+	azureclient *azureProviderStruct
 )
 
 type ClientS3 struct {
@@ -38,6 +39,7 @@ type xsynchco struct {
 type azureProviderStruct struct {
     azClient  *azidentity.DefaultAzureCredential
 	Region string 
+	resourceGroupName string
 }
 
 func NewClientS3(region string) (*ClientS3, error) {
@@ -110,7 +112,7 @@ func (p *xsynchProvider) Schema(_ context.Context, _ provider.SchemaRequest, res
 			},
 			"region": schema.StringAttribute{
 				Optional: true,
-			},
+			},			
 		},
 	}
 }
@@ -146,16 +148,35 @@ func (p *xsynchProvider) Configure(ctx context.Context, req provider.ConfigureRe
 	} else {
 		region = os.Getenv("S3_REGION")
 	}
-
+	ctx = tflog.SetField(ctx, "Cloud Provider", xsynchcoConfig.Cloud_Provider.ValueString())
 	switch xsynchcoConfig.Cloud_Provider.ValueString(){
 	case "aws":
-		ctx = tflog.SetField(ctx, "Cloud Provider", xsynchcoConfig.Cloud_Provider.ValueString())
+		
 		tflog.Debug(ctx, "Creating AWS Client")
 		awsClient, err = NewClientS3(region)
 		if err != nil {
 			resp.Diagnostics.AddError("unable to create AWS client", "An unexpected error occurred creating the AWS client: "+err.Error())
 	
 		}
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		resp.DataSourceData = awsClient
+		resp.ResourceData = awsClient
+	
+		tflog.Info(ctx, "Configured AWS Client", map[string]any{"success": true})
+	case "azure":
+		tflog.Debug(ctx, "Creating AWS Client")
+		azureclient, err = newAZClient(region)
+		if err != nil {
+			resp.Diagnostics.AddError("unable to create Azure client", "An unexpected error occurred creating the Azure client: "+err.Error())
+		}
+		if resp.Diagnostics.HasError() {
+			return
+		}
+
+		resp.DataSourceData = azureclient
+		resp.ResourceData = azureclient
 
 	}
 
@@ -165,16 +186,11 @@ func (p *xsynchProvider) Configure(ctx context.Context, req provider.ConfigureRe
 	// 	resp.Diagnostics.AddError("unable to create AWS client", "An unexpected error occurred creating the AWS client: "+err.Error())
 
 	// }
-	if resp.Diagnostics.HasError() {
-		return
-	}
 
 
 
-	resp.DataSourceData = awsClient
-	resp.ResourceData = awsClient
 
-	tflog.Info(ctx, "Configured AWS Client", map[string]any{"success": true})
+
 
 }
 

@@ -7,11 +7,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore/to"
+	// "github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resources/armresources"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/storage/armstorage"
-	"github.com/Azure/azure-sdk-for-go/sdk/azcore/to"
-	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	
+
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -24,10 +25,24 @@ var (
 	_ resource.ResourceWithConfigure = &azureStorageResource{}
 )
 
+var (
+	resourcesClientFactory *armresources.ClientFactory
+	storageClientFactory   *armstorage.ClientFactory
+)
+
+var (
+	resourceGroupClient *armresources.ResourceGroupsClient
+	accountsClient      *armstorage.AccountsClient
+	
+)
+
+
 type azureStorageResourceModel struct {
 	ID           types.String `tfsdk:"id"`
 	Last_Updated types.String `tfsdk:"last_updated"`
 	Buckets      []buckets    `tfsdk:"buckets"`
+	SubscriptionID types.String `tfsdk:"subscriptionid"`
+	ResourceGroupName types.String `tfsdk:"resource_group_name"`
 }
 
 type azbuckets struct {
@@ -74,9 +89,12 @@ func (r *azureStorageResource) Schema(_ context.Context, _ resource.SchemaReques
 			"id": schema.StringAttribute{
 				Computed: true,
 			},
-			"last_updated": schema.StringAttribute{
-				Computed: true,
+			"subscriptionid": schema.StringAttribute{
+				Required: true,
 			},
+			"resource_group_name": schema.StringAttribute{
+				Required: true,
+			},			
 			"buckets": schema.ListNestedAttribute{
 				Required: true,
 				NestedObject: schema.NestedAttributeObject{
@@ -105,25 +123,54 @@ func (r *azureStorageResource) Create(ctx context.Context, req resource.CreateRe
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	plan.ID = types.StringValue(strconv.Itoa(1))
+	
+
+	resourcesClientFactory, err = armresources.NewClientFactory(plan.SubscriptionID.String(), r.client.azClient, nil)
+	if err != nil {
+		resp.Diagnostics.AddError(
+			"Error creating azure resources client factory",
+			err.Error(),
+		)
+		fmt.Println(err)
+	}
+	resourceGroupClient = resourcesClientFactory.NewResourceGroupsClient()
+
+	storageClientFactory, err = armstorage.NewClientFactory(plan.SubscriptionID.String(), r.client.azClient, nil)
+	if err != nil {
+		resp.Diagnostics.AddError(
+			"Error creating storage account client",
+			err.Error(),
+		)
+		fmt.Println(err)
+	}
+	accountsClient = storageClientFactory.NewAccountsClient()
+	_, err = resourceGroupClient.CreateOrUpdate(ctx,plan.ResourceGroupName.ValueString(),
+		armresources.ResourceGroup{ Location: &r.client.Region,},nil)
+	if err != nil {
+		resp.Diagnostics.AddError("error creating resource group",err.Error())
+		fmt.Println(err)
+	}
+
+
 	for index, item := range plan.Buckets {
 
 		// Create an S3 service client
 
-		svc := r.client.azClient
+		// svc := r.client.azClient
 
-		awsStringBucket := strings.Replace(item.Name.String(), "\"", "", -1)
+		// awsStringBucket := strings.Replace(item.Name.String(), "\"", "", -1)
 
-		// Create input parameters for the CreateBucket operation
+		// // Create input parameters for the CreateBucket operation
 
-		input := &s3.CreateBucketInput{
+		// input := &s3.CreateBucketInput{
 
-			Bucket: aws.String(awsStringBucket),
-		}
+		// 	Bucket: aws.String(awsStringBucket),
+		// }
 
 		// Execute the CreateBucket operation
 
-		_, err := svc.CreateBucket(context.Background(), input)
+		// _, err := svc.CreateBucket(context.Background(), input)
+		storageResponse, err := createStorageAccount(context.Background(),plan.ResourceGroupName.ValueString(),item.Name.ValueString(),r.client.Region)
 
 		if err != nil {
 
@@ -137,43 +184,59 @@ func (r *azureStorageResource) Create(ctx context.Context, req resource.CreateRe
 			return
 
 		}
+		plan.ID = types.StringValue(*storageResponse.ID)
 
 		// Add tags
-
-		var tags []awstypes.Tag
-
 		tagValue := strings.Replace(item.Tags.String(), "\"", "", -1)
 
-		tags = append(tags, awstypes.Tag{
-
-			Key: aws.String("tfkey"),
-
-			Value: aws.String(tagValue),
-		})
-
-		_, err = svc.PutBucketTagging(ctx, &s3.PutBucketTaggingInput{
-
-			Bucket: aws.String(awsStringBucket),
-
-			Tagging: &awstypes.Tagging{
-
-				TagSet: tags,
+		_, err = accountsClient.Update(ctx, plan.ResourceGroupName.ValueString(),*storageResponse.Name,armstorage.AccountUpdateParameters{
+			Tags: map[string]*string{
+				"xsynchco": to.Ptr(tagValue),
 			},
-		})
-
+		},nil)	
 		if err != nil {
-
-			fmt.Println("Error adding tags to the bucket:", err)
+			resp.Diagnostics.AddError("error adding tags to storage account",err.Error())
+			
+			fmt.Println("Error adding tags to the storage account:", err)
 
 			return
 
 		}
 
+		// var tags []awstypes.Tag
+
+		
+
+		// tags = append(tags, awstypes.Tag{
+
+		// 	Key: aws.String("tfkey"),
+
+		// 	Value: aws.String(tagValue),
+		// })
+
+		// _, err = svc.PutBucketTagging(ctx, &s3.PutBucketTaggingInput{
+
+		// 	Bucket: aws.String(awsStringBucket),
+
+		// 	Tagging: &awstypes.Tagging{
+
+		// 		TagSet: tags,
+		// 	},
+		// })
+
+		// if err != nil {
+
+		// 	fmt.Println("Error adding tags to the bucket:", err)
+
+		// 	return
+
+		// }
+
 		fmt.Printf("Bucket %s created successfully\n", item.Name)
 
 		plan.Buckets[index] = buckets{
 
-			Name: types.StringValue(awsStringBucket),
+			Name: types.StringValue(item.Name.ValueString()),
 
 			Date: types.StringValue(time.Now().Format(time.RFC850)),
 
@@ -253,7 +316,7 @@ func (r *azureStorageResource) Update(ctx context.Context, req resource.UpdateRe
 
 	// Retrieve values from plan
 
-	var plan s3ResourceModel
+	var plan azureStorageResourceModel
 
 	diags := req.Plan.Get(ctx, &plan)
 
@@ -271,7 +334,7 @@ func (r *azureStorageResource) Update(ctx context.Context, req resource.UpdateRe
 
 		// Create an S3 service client
 
-		svc := r.client.S3Client
+		svc := r.client.azClient
 
 		awsStringBucket := strings.Replace(item.Name.String(), "\"", "", -1)
 

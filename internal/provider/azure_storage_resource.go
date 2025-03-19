@@ -38,14 +38,15 @@ var (
 
 
 type azureStorageResourceModel struct {
-	ID           types.String `tfsdk:"id"`
+	
 	Last_Updated types.String `tfsdk:"last_updated"`
-	Buckets      []buckets    `tfsdk:"buckets"`
+	Buckets      []azbuckets    `tfsdk:"buckets"`
 	SubscriptionID types.String `tfsdk:"subscriptionid"`
 	ResourceGroupName types.String `tfsdk:"resource_group_name"`
 }
 
 type azbuckets struct {
+	ID types.String `tfsdk:"id"`
 	Date types.String `tfsdk:"date"`
 	Name types.String `tfsdk:"name"`
 	Tags types.String `tfsdk:"tags"`
@@ -56,7 +57,7 @@ func NewAzureStorageResource() resource.Resource {
 	return &azureStorageResource{}
 }
 
-// s3Resource is the resource implementation.
+// azure storage account is the resource implementation.
 type azureStorageResource struct {
 	client *azureProviderStruct
 }
@@ -86,9 +87,6 @@ func (r *azureStorageResource) Metadata(_ context.Context, req resource.Metadata
 func (r *azureStorageResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		Attributes: map[string]schema.Attribute{
-			"id": schema.StringAttribute{
-				Computed: true,
-			},
 			"subscriptionid": schema.StringAttribute{
 				Required: true,
 			},
@@ -99,6 +97,9 @@ func (r *azureStorageResource) Schema(_ context.Context, _ resource.SchemaReques
 				Required: true,
 				NestedObject: schema.NestedAttributeObject{
 					Attributes: map[string]schema.Attribute{
+						"id": schema.StringAttribute{
+							Computed: true,
+						},
 						"date": schema.StringAttribute{
 							Computed: true,
 						},
@@ -154,22 +155,7 @@ func (r *azureStorageResource) Create(ctx context.Context, req resource.CreateRe
 
 	for index, item := range plan.Buckets {
 
-		// Create an S3 service client
 
-		// svc := r.client.azClient
-
-		// awsStringBucket := strings.Replace(item.Name.String(), "\"", "", -1)
-
-		// // Create input parameters for the CreateBucket operation
-
-		// input := &s3.CreateBucketInput{
-
-		// 	Bucket: aws.String(awsStringBucket),
-		// }
-
-		// Execute the CreateBucket operation
-
-		// _, err := svc.CreateBucket(context.Background(), input)
 		storageResponse, err := createStorageAccount(context.Background(),plan.ResourceGroupName.ValueString(),item.Name.ValueString(),r.client.Region)
 
 		if err != nil {
@@ -184,7 +170,7 @@ func (r *azureStorageResource) Create(ctx context.Context, req resource.CreateRe
 			return
 
 		}
-		plan.ID = types.StringValue(*storageResponse.ID)
+		// plan.ID = types.StringValue(*storageResponse.ID)
 
 		// Add tags
 		tagValue := strings.Replace(item.Tags.String(), "\"", "", -1)
@@ -203,38 +189,12 @@ func (r *azureStorageResource) Create(ctx context.Context, req resource.CreateRe
 
 		}
 
-		// var tags []awstypes.Tag
-
-		
-
-		// tags = append(tags, awstypes.Tag{
-
-		// 	Key: aws.String("tfkey"),
-
-		// 	Value: aws.String(tagValue),
-		// })
-
-		// _, err = svc.PutBucketTagging(ctx, &s3.PutBucketTaggingInput{
-
-		// 	Bucket: aws.String(awsStringBucket),
-
-		// 	Tagging: &awstypes.Tagging{
-
-		// 		TagSet: tags,
-		// 	},
-		// })
-
-		// if err != nil {
-
-		// 	fmt.Println("Error adding tags to the bucket:", err)
-
-		// 	return
-
-		// }
+	
 
 		fmt.Printf("Bucket %s created successfully\n", item.Name)
 
 		plan.Buckets[index] = buckets{
+			ID: types.StringValue(*storageResponse.ID),
 
 			Name: types.StringValue(item.Name.ValueString()),
 
@@ -263,7 +223,7 @@ func (r *azureStorageResource) Read(ctx context.Context, req resource.ReadReques
 
 	// Get current state
 
-	var state s3ResourceModel
+	var state azureStorageResourceModel
 
 	diags := req.State.Get(ctx, &state)
 
@@ -274,28 +234,35 @@ func (r *azureStorageResource) Read(ctx context.Context, req resource.ReadReques
 		return
 
 	}
+	//overwrite whatever is is the state with the current values
+	state.Buckets = make([]azbuckets,0)
+	storageAccounts := make([]*armstorage.Account,0)
 
-	for _, item := range state.Buckets {
 
-		awsStringBucket := strings.Replace(item.Name.String(), "\"", "", -1)
+		//need to get a status of all storage accounts within the resource group
 
-		svc := r.client.S3Client
-
-		params := &s3.HeadBucketInput{
-
-			Bucket: aws.String(awsStringBucket),
-		}
-
-		_, err := svc.HeadBucket(ctx, params)
-
+	listAccounts := accountsClient.NewListPager(nil)
+	for listAccounts.More(){
+		pageResponse, err := listAccounts.NextPage(ctx)
 		if err != nil {
-
-			tflog.Error(ctx, fmt.Sprintf("error getting bucket information: %s", err))
-			return
-
+			tflog.Error(ctx,fmt.Sprintf("Error listing storage accounts: %s",err.Error()))
+			fmt.Println("Error listing storage accounts ",err.Error())
+			return 
 		}
+		storageAccounts = append(storageAccounts,pageResponse.AccountListResult.Value...)
 
 	}
+	for _ ,storageAccount := range storageAccounts{
+
+		state.Buckets = append(state.Buckets, azbuckets{
+			ID: types.StringPointerValue(storageAccount.ID),
+			Name: types.StringPointerValue(storageAccount.Name),
+			Date: types.StringValue(storageAccount.Properties.CreationTime.UTC().String()),
+			Tags: types.StringValue(fmt.Sprintf("%v",storageAccount.Tags)),
+		})
+	}
+		
+
 
 	// Set refreshed state
 

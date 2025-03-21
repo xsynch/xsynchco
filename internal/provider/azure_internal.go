@@ -50,3 +50,4 @@ func createStorageAccount(ctx context.Context, resourceGroupName string, storage
 	
 	return &resp.Account, nil
 }
+

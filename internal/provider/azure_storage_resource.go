@@ -3,7 +3,7 @@ package provider
 import (
 	"context"
 	"fmt"
-	"strconv"
+
 	"strings"
 	"time"
 
@@ -11,7 +11,6 @@ import (
 	// "github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resources/armresources"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/storage/armstorage"
-	
 
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -40,7 +39,8 @@ var (
 type azureStorageResourceModel struct {
 	
 	Last_Updated types.String `tfsdk:"last_updated"`
-	Buckets      []azbuckets    `tfsdk:"buckets"`
+	StorageAccount      []azbuckets    `tfsdk:"buckets"`
+	// StorageAccount      []armstorage.Account    `tfsdk:"storage_account"`
 	SubscriptionID types.String `tfsdk:"subscriptionid"`
 	ResourceGroupName types.String `tfsdk:"resource_group_name"`
 }
@@ -93,7 +93,7 @@ func (r *azureStorageResource) Schema(_ context.Context, _ resource.SchemaReques
 			"resource_group_name": schema.StringAttribute{
 				Required: true,
 			},			
-			"buckets": schema.ListNestedAttribute{
+			"storage_account": schema.ListNestedAttribute{
 				Required: true,
 				NestedObject: schema.NestedAttributeObject{
 					Attributes: map[string]schema.Attribute{
@@ -150,10 +150,11 @@ func (r *azureStorageResource) Create(ctx context.Context, req resource.CreateRe
 	if err != nil {
 		resp.Diagnostics.AddError("error creating resource group",err.Error())
 		fmt.Println(err)
+		return 
 	}
 
 
-	for index, item := range plan.Buckets {
+	for index, item := range plan.StorageAccount {
 
 
 		storageResponse, err := createStorageAccount(context.Background(),plan.ResourceGroupName.ValueString(),item.Name.ValueString(),r.client.Region)
@@ -173,7 +174,7 @@ func (r *azureStorageResource) Create(ctx context.Context, req resource.CreateRe
 		// plan.ID = types.StringValue(*storageResponse.ID)
 
 		// Add tags
-		tagValue := strings.Replace(item.Tags.String(), "\"", "", -1)
+		tagValue := strings.Replace(item.Tags.ValueString(), "\"", "", -1)
 
 		_, err = accountsClient.Update(ctx, plan.ResourceGroupName.ValueString(),*storageResponse.Name,armstorage.AccountUpdateParameters{
 			Tags: map[string]*string{
@@ -193,7 +194,7 @@ func (r *azureStorageResource) Create(ctx context.Context, req resource.CreateRe
 
 		fmt.Printf("Bucket %s created successfully\n", item.Name)
 
-		plan.Buckets[index] = buckets{
+		plan.StorageAccount[index] = azbuckets{
 			ID: types.StringValue(*storageResponse.ID),
 
 			Name: types.StringValue(item.Name.ValueString()),
@@ -234,8 +235,29 @@ func (r *azureStorageResource) Read(ctx context.Context, req resource.ReadReques
 		return
 
 	}
+
+	resourcesClientFactory, err = armresources.NewClientFactory(state.SubscriptionID.String(), r.client.azClient, nil)
+	if err != nil {
+		resp.Diagnostics.AddError(
+			"Error creating azure resources client factory",
+			err.Error(),
+		)
+		fmt.Println(err)
+	}
+	resourceGroupClient = resourcesClientFactory.NewResourceGroupsClient()
+
+	storageClientFactory, err = armstorage.NewClientFactory(state.SubscriptionID.String(), r.client.azClient, nil)
+	if err != nil {
+		resp.Diagnostics.AddError(
+			"Error creating storage account client",
+			err.Error(),
+		)
+		fmt.Println(err)
+	}
+	accountsClient = storageClientFactory.NewAccountsClient()
+
 	//overwrite whatever is is the state with the current values
-	state.Buckets = make([]azbuckets,0)
+	state.StorageAccount = make([]azbuckets,0)
 	storageAccounts := make([]*armstorage.Account,0)
 
 
@@ -254,7 +276,7 @@ func (r *azureStorageResource) Read(ctx context.Context, req resource.ReadReques
 	}
 	for _ ,storageAccount := range storageAccounts{
 
-		state.Buckets = append(state.Buckets, azbuckets{
+		state.StorageAccount = append(state.StorageAccount, azbuckets{
 			ID: types.StringPointerValue(storageAccount.ID),
 			Name: types.StringPointerValue(storageAccount.Name),
 			Date: types.StringValue(storageAccount.Properties.CreationTime.UTC().String()),
@@ -294,51 +316,61 @@ func (r *azureStorageResource) Update(ctx context.Context, req resource.UpdateRe
 		return
 
 	}
+	subscriptionId := plan.SubscriptionID.ValueString()
 
-	plan.ID = types.StringValue(strconv.Itoa(1))
 
-	for index, item := range plan.Buckets {
+	resourcesClientFactory, err = armresources.NewClientFactory(subscriptionId, r.client.azClient, nil)
+	if err != nil {
+		resp.Diagnostics.AddError(
+			"Error creating azure resources client factory",
+			err.Error(),
+		)
+		fmt.Println(err)
+		return 
+	}
+	resourceGroupClient = resourcesClientFactory.NewResourceGroupsClient()
+
+	storageClientFactory, err = armstorage.NewClientFactory(subscriptionId, r.client.azClient, nil)
+	if err != nil {
+		resp.Diagnostics.AddError(
+			"Error creating storage account client",
+			err.Error(),
+		)
+		fmt.Println(err)
+		return 
+	}
+	accountsClient = storageClientFactory.NewAccountsClient()
+
+	// plan.ID = types.StringValue(strconv.Itoa(1))
+
+	for index, item := range plan.StorageAccount {
 
 		// Create an S3 service client
 
-		svc := r.client.azClient
+		// svc := r.client.azClient
 
-		awsStringBucket := strings.Replace(item.Name.String(), "\"", "", -1)
+		storageAccountName := strings.Replace(item.Name.String(), "\"", "", -1)
 
-		// Add tags
+				// Add tags
+		tagValue := strings.Replace(item.Tags.ValueString(), "\"", "", -1)
 
-		var tags []awstypes.Tag
-
-		tagValue := strings.Replace(item.Tags.String(), "\"", "", -1)
-
-		tags = append(tags, awstypes.Tag{
-
-			Key: aws.String("tfkey"),
-
-			Value: aws.String(tagValue),
-		})
-
-		_, err := svc.PutBucketTagging(context.Background(), &s3.PutBucketTaggingInput{
-
-			Bucket: aws.String(awsStringBucket),
-
-			Tagging: &awstypes.Tagging{
-
-				TagSet: tags,
-			},
-		})
-
+		azClientUpdateResp, err := accountsClient.Update(ctx, plan.ResourceGroupName.ValueString(),storageAccountName,armstorage.AccountUpdateParameters{
+					Tags: map[string]*string{
+						"xsynchco": to.Ptr(tagValue),
+				},
+				},nil)	
 		if err != nil {
-
-			fmt.Println("Error adding tags to the bucket:", err)
-
+			resp.Diagnostics.AddError("error adding tags to storage account",err.Error())
+			fmt.Println("Error adding tags to the storage account:", err)
 			return
-
+		
 		}
+		
 
-		plan.Buckets[index] = buckets{
+		plan.StorageAccount[index] = azbuckets{
+			ID: types.StringPointerValue(azClientUpdateResp.ID),
 
-			Name: types.StringValue(strings.Replace(awsStringBucket, "\"", "", -1)),
+			Name: types.StringValue(strings.Replace(storageAccountName, "\"", "", -1)),
 
 			Date: types.StringValue(time.Now().Format(time.RFC850)),
 
@@ -366,7 +398,7 @@ func (r *azureStorageResource) Delete(ctx context.Context, req resource.DeleteRe
 
 	// Retrieve values from state
 
-	var state s3ResourceModel
+	var state azureStorageResourceModel
 
 	diags := req.State.Get(ctx, &state)
 
@@ -377,66 +409,105 @@ func (r *azureStorageResource) Delete(ctx context.Context, req resource.DeleteRe
 		return
 
 	}
+	subscriptionId := state.SubscriptionID.ValueString()
+	
 
-	for _, item := range state.Buckets {
 
-		svc := r.client.S3Client
+	resourcesClientFactory, err = armresources.NewClientFactory(subscriptionId, r.client.azClient, nil)
+	if err != nil {
+		resp.Diagnostics.AddError(
+			"Error creating azure resources client factory",
+			err.Error(),
+		)
+		fmt.Println(err)
+		return 
+	}
+	resourceGroupClient = resourcesClientFactory.NewResourceGroupsClient()
 
-		input := &s3.DeleteBucketInput{
+	storageClientFactory, err = armstorage.NewClientFactory(subscriptionId, r.client.azClient, nil)
+	if err != nil {
+		resp.Diagnostics.AddError(
+			"Error creating storage account client",
+			err.Error(),
+		)
+		fmt.Println(err)
+		return 
+	}
+	accountsClient = storageClientFactory.NewAccountsClient()
 
-			Bucket: aws.String(strings.Replace(item.Name.String(), "\"", "", -1)),
-		}
+	for _, item := range state.StorageAccount {
 
-		_, err := svc.DeleteBucket(context.Background(), input)
-
+		_,err = accountsClient.Delete(ctx,r.client.resourceGroupName,item.Name.ValueString(),nil)
 		if err != nil {
-
-			// log.Fatalf("failed to delete bucket, %v", err)
-			tflog.Error(ctx, fmt.Sprintf("failed to delete bucket: %v", err), map[string]any{"success": false})
-
+			tflog.Error(ctx,fmt.Sprintf("Error deleteing %s due to: %s",item.Name.ValueString(),err.Error()),map[string]any{"success":false})
+			return
 		}
+		tflog.Info(ctx,fmt.Sprintf("%s deleted successfully\n",item.Name.ValueString()),map[string]any{"success":true})
+
 
 	}
+	return 
+	
 
 }
 
-func (r *azureStorageResource) createStorageAccount(ctx context.Context) (*armstorage.Account, error) {
 
-	var accountsClient  *armstorage.AccountsClient
+// func createAccountsClient(){
+// 	resourceGroupClient = resourcesClientFactory.NewResourceGroupsClient()
 
-	pollerResp, err := accountsClient.BeginCreate(
-		ctx,
-		resourceGroupName,
-		storageAccountName,
-		armstorage.AccountCreateParameters{
-			Kind: to.Ptr(armstorage.KindStorageV2),
-			SKU: &armstorage.SKU{
-				Name: to.Ptr(armstorage.SKUNameStandardLRS),
-			},
-			Location: to.Ptr(r.client.Region),
-			Properties: &armstorage.AccountPropertiesCreateParameters{
-				AccessTier: to.Ptr(armstorage.AccessTierCool),
-				Encryption: &armstorage.Encryption{
-					Services: &armstorage.EncryptionServices{
-						File: &armstorage.EncryptionService{
-							KeyType: to.Ptr(armstorage.KeyTypeAccount),
-							Enabled: to.Ptr(true),
-						},
-						Blob: &armstorage.EncryptionService{
-							KeyType: to.Ptr(armstorage.KeyTypeAccount),
-							Enabled: to.Ptr(true),
-						},
-					},
-					KeySource: to.Ptr(armstorage.KeySourceMicrosoftStorage),
-				},
-			},
-		}, nil)
-	if err != nil {
-		return nil, err
-	}
-	resp, err := pollerResp.PollUntilDone(ctx, nil)
-	if err != nil {
-		return nil, err
-	}
-	return &resp.Account, nil
-}
+// 	storageClientFactory, err = armstorage.NewClientFactory(plan.SubscriptionID.String(), r.client.azClient, nil)
+// 	if err != nil {
+
+// 		fmt.Println(err)
+// 	}
+// 	accountsClient = storageClientFactory.NewAccountsClient()
+// 	_, err = resourceGroupClient.CreateOrUpdate(ctx,plan.ResourceGroupName.ValueString(),
+// 		armresources.ResourceGroup{ Location: &r.client.Region,},nil)
+// 	if err != nil {
+// 		resp.Diagnostics.AddError("error creating resource group",err.Error())
+// 		fmt.Println(err)
+// 		return 
+// 	}
+
+// }
+
+// func (r *azureStorageResource) createStorageAccount(ctx context.Context) (*armstorage.Account, error) {
+
+// 	var accountsClient  *armstorage.AccountsClient
+
+// 	pollerResp, err := accountsClient.BeginCreate(
+// 		ctx,
+// 		resourceGroupName,
+// 		storageAccountName,
+// 		armstorage.AccountCreateParameters{
+// 			Kind: to.Ptr(armstorage.KindStorageV2),
+// 			SKU: &armstorage.SKU{
+// 				Name: to.Ptr(armstorage.SKUNameStandardLRS),
+// 			},
+// 			Location: to.Ptr(r.client.Region),
+// 			Properties: &armstorage.AccountPropertiesCreateParameters{
+// 				AccessTier: to.Ptr(armstorage.AccessTierCool),
+// 				Encryption: &armstorage.Encryption{
+// 					Services: &armstorage.EncryptionServices{
+// 						File: &armstorage.EncryptionService{
+// 							KeyType: to.Ptr(armstorage.KeyTypeAccount),
+// 							Enabled: to.Ptr(true),
+// 						},
+// 						Blob: &armstorage.EncryptionService{
+// 							KeyType: to.Ptr(armstorage.KeyTypeAccount),
+// 							Enabled: to.Ptr(true),
+// 						},
+// 					},
+// 					KeySource: to.Ptr(armstorage.KeySourceMicrosoftStorage),
+// 				},
+// 			},
+// 		}, nil)
+// 	if err != nil {
+// 		return nil, err
+// 	}
+// 	resp, err := pollerResp.PollUntilDone(ctx, nil)
+// 	if err != nil {
+// 		return nil, err
+// 	}
+// 	return &resp.Account, nil
+// }

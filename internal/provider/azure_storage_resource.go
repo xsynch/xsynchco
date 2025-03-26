@@ -39,7 +39,7 @@ var (
 type azureStorageResourceModel struct {
 	
 	Last_Updated types.String `tfsdk:"last_updated"`
-	StorageAccount      []azbuckets    `tfsdk:"buckets"`
+	StorageAccount      []azbuckets    `tfsdk:"storage_accounts"`
 	// StorageAccount      []armstorage.Account    `tfsdk:"storage_account"`
 	SubscriptionID types.String `tfsdk:"subscriptionid"`
 	ResourceGroupName types.String `tfsdk:"resource_group_name"`
@@ -92,8 +92,11 @@ func (r *azureStorageResource) Schema(_ context.Context, _ resource.SchemaReques
 			},
 			"resource_group_name": schema.StringAttribute{
 				Required: true,
-			},			
-			"storage_account": schema.ListNestedAttribute{
+			},	
+			"last_updated": schema.StringAttribute{
+				Computed: true,
+			},
+			"storage_accounts": schema.ListNestedAttribute{
 				Required: true,
 				NestedObject: schema.NestedAttributeObject{
 					Attributes: map[string]schema.Attribute{
@@ -126,7 +129,7 @@ func (r *azureStorageResource) Create(ctx context.Context, req resource.CreateRe
 	}
 	
 
-	resourcesClientFactory, err = armresources.NewClientFactory(plan.SubscriptionID.String(), r.client.azClient, nil)
+	resourcesClientFactory, err = armresources.NewClientFactory(plan.SubscriptionID.ValueString(), r.client.azClient, nil)
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Error creating azure resources client factory",
@@ -136,7 +139,7 @@ func (r *azureStorageResource) Create(ctx context.Context, req resource.CreateRe
 	}
 	resourceGroupClient = resourcesClientFactory.NewResourceGroupsClient()
 
-	storageClientFactory, err = armstorage.NewClientFactory(plan.SubscriptionID.String(), r.client.azClient, nil)
+	storageClientFactory, err = armstorage.NewClientFactory(plan.SubscriptionID.ValueString(), r.client.azClient, nil)
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Error creating storage account client",
@@ -438,6 +441,7 @@ func (r *azureStorageResource) Delete(ctx context.Context, req resource.DeleteRe
 	for _, item := range state.StorageAccount {
 
 		_,err = accountsClient.Delete(ctx,r.client.resourceGroupName,item.Name.ValueString(),nil)
+		
 		if err != nil {
 			tflog.Error(ctx,fmt.Sprintf("Error deleteing %s due to: %s",item.Name.ValueString(),err.Error()),map[string]any{"success":false})
 			return
@@ -446,7 +450,7 @@ func (r *azureStorageResource) Delete(ctx context.Context, req resource.DeleteRe
 
 
 	}
-	return 
+	 
 	
 
 }

@@ -205,6 +205,7 @@ func (p *xsynchProvider) DataSources(_ context.Context) []func() datasource.Data
 func (p *xsynchProvider) Resources(_ context.Context) []func() resource.Resource {
 	return []func() resource.Resource{
 		NewS3Resource,
+		NewAzureStorageResource,
 	}
 }
 

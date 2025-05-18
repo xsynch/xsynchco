@@ -31,9 +31,9 @@ type ClientS3 struct {
 
 type xsynchco struct {
 	Cloud_Provider hashitypes.String `tfsdk:"cloud_provider"`
-	Username       hashitypes.String `tfsdk:"username"`
-	Password       hashitypes.String `tfsdk:"password"`
-	Region         hashitypes.String `tfsdk:"region"`
+	// Username       hashitypes.String `tfsdk:"username"`
+	// Password       hashitypes.String `tfsdk:"password"`
+	// Region         hashitypes.String `tfsdk:"region"`
 }
 
 type azureProviderStruct struct {
@@ -103,16 +103,16 @@ func (p *xsynchProvider) Schema(_ context.Context, _ provider.SchemaRequest, res
 				Required:    true,
 				Description: "This is the name of the cloud provider you want to use for storage creation",
 			},
-			"username": schema.StringAttribute{
-				Optional: true,
-			},
-			"password": schema.StringAttribute{
-				Optional:  true,
-				Sensitive: true,
-			},
-			"region": schema.StringAttribute{
-				Optional: true,
-			},			
+			// "username": schema.StringAttribute{
+			// 	Optional: true,
+			// },
+			// "password": schema.StringAttribute{
+			// 	Optional:  true,
+			// 	Sensitive: true,
+			// },
+			// "region": schema.StringAttribute{
+			// 	Optional: true,
+			// },			
 		},
 	}
 }
@@ -134,24 +134,24 @@ func (p *xsynchProvider) Configure(ctx context.Context, req provider.ConfigureRe
 		)
 	}
 
-	if xsynchcoConfig.Region.IsUnknown() {
-		resp.Diagnostics.AddAttributeError(
-			path.Root("region"),
-			"Unknown Region",
-			"Region for the new storage account must be specified",
-		)
-	}
+	// if xsynchcoConfig.Region.IsUnknown() {
+	// 	resp.Diagnostics.AddAttributeError(
+	// 		path.Root("region"),
+	// 		"Unknown Region",
+	// 		"Region for the new storage account must be specified",
+	// 	)
+	// }
 	
 
-	if !xsynchcoConfig.Region.IsNull() {
-		region = xsynchcoConfig.Region.ValueString()
-	} else {
-		region = os.Getenv("S3_REGION")
-	}
+	// if !xsynchcoConfig.Region.IsNull() {
+	// 	region = xsynchcoConfig.Region.ValueString()
+	// } else {
+		// region = os.Getenv("S3_REGION")
+	// }
 	ctx = tflog.SetField(ctx, "Cloud Provider", xsynchcoConfig.Cloud_Provider.ValueString())
 	switch xsynchcoConfig.Cloud_Provider.ValueString(){
 	case "aws":
-		
+		region = os.Getenv("S3_REGION")
 		tflog.Debug(ctx, "Creating AWS Client")
 		awsClient, err = NewClientS3(region)
 		if err != nil {
@@ -166,6 +166,7 @@ func (p *xsynchProvider) Configure(ctx context.Context, req provider.ConfigureRe
 	
 		tflog.Info(ctx, "Configured AWS Client", map[string]any{"success": true})
 	case "azure":
+		region = "eastus"
 		tflog.Debug(ctx, "Creating AWS Client")
 		azureclient, err = newAZClient(region)
 		if err != nil {
